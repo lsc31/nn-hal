@@ -14,13 +14,13 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "Driver"
-
 #include "Driver.h"
 #include <android-base/logging.h>
 #include <thread>
 #include "PreparedModel.h"
 #include "ValidateHal.h"
+
+#define LOG_TAG "Driver"
 
 namespace android {
 namespace hardware {
@@ -28,6 +28,24 @@ namespace neuralnetworks {
 namespace nnhal {
 
 using namespace android::nn;
+
+#ifdef USE_NGRAPH
+static bool checkNgraphSupport(const Model& model) {
+    if (isNgraphPropSet()) {
+        int count = model.operations.size();
+        for (int i = 0; i < count; i++) {
+            const auto& operation = model.operations[i];
+            if (!PreparedModel::isOperationSupportedByNgraph(operation)) {
+                return false;
+            }
+        }
+        ALOGI("%s returns true", __func__);
+        return true;
+    }
+    return false;
+}
+#endif
+
 hidl_vec<Capabilities::OperandPerformance> nonExtensionOperandPerformance(PerformanceInfo perf) {
     using OpPerf = Capabilities::OperandPerformance;
 
@@ -95,7 +113,11 @@ Return<ErrorStatus> Driver::prepareModel_1_2(const Model& model, ExecutionPrefer
         return ErrorStatus::INVALID_ARGUMENT;
     }
 
+#ifdef USE_NGRAPH
+    if (!preparedModel->initialize(checkNgraphSupport(model))) {
+#else
     if (!preparedModel->initialize()) {
+#endif
         ALOGI("failed to initialize preparedmodel");
         callback->notify(ErrorStatus::INVALID_ARGUMENT, nullptr);
         return ErrorStatus::NONE;
@@ -217,9 +239,16 @@ Return<void> Driver::getSupportedOperations_1_2(const Model& model,
         return Void();
     }
 
+#ifdef USE_NGRAPH
+    bool ngraphSupport = checkNgraphSupport(model);
+#endif
     for (int i = 0; i < count; i++) {
         const auto& operation = model.operations[i];
+#ifdef USE_NGRAPH
+        supported[i] = PreparedModel::isOperationSupported(operation, model, ngraphSupport);
+#else
         supported[i] = PreparedModel::isOperationSupported(operation, model);
+#endif
     }
     cb(ErrorStatus::NONE, supported);
     return Void();

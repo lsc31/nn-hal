@@ -30,7 +30,9 @@
 #include "IENetwork.h"
 
 #ifdef USE_NGRAPH
+#include "DetectionClient.h"
 #include "create_ngraph.hpp"
+using objectDetection::Detection;
 #endif
 
 #define EXPL_PAD 1
@@ -133,9 +135,9 @@ public:
           mPadreq(EXPL_PAD) {
         g_layer_precision = InferenceEngine::Precision::FP16;
 #ifdef USE_NGRAPH
-        mUseNgraph =
-            isNgraphPropSet();  // TODO:Should additionally check if all the ops are supported
+        mUseNgraph = isNgraphPropSet();
         mCreateNgraph = std::make_shared<CreateNgraph>();
+        mRemoteCheck = false;
 #endif
     }
 
@@ -158,7 +160,11 @@ public:
     }
 
     ~PreparedModel() override { deinitialize(); }
+#ifdef USE_NGRAPH
+    bool initialize(bool ngraphSupport = false);
+#else
     bool initialize();
+#endif
     Return<ErrorStatus> execute(const Request& request,
                                 const sp<V1_0::IExecutionCallback>& callback) override;
     Return<ErrorStatus> execute_1_2(const Request& request, MeasureTiming measure,
@@ -173,7 +179,15 @@ public:
 
     // Return<ErrorStatus> executeBase(const Request& request, MeasureTiming measure,
     //                             const sp<T_IExecutionCallback>& callback);
+#ifdef USE_NGRAPH
+    bool checkRemoteConnection();
+    bool loadRemoteModel();
+    static bool isOperationSupportedByNgraph(const Operation& operation);
+    static bool isOperationSupported(const Operation& operation, const Model& model,
+                                     bool ngraphSupport = false);
+#else
     static bool isOperationSupported(const Operation& operation, const Model& model);
+#endif
 #ifdef USE_NGRAPH
     void ConvertBlobToNHWC(InferenceEngine::TBlob<float>::Ptr blob, uint8_t* buf,
                            std::vector<uint32_t> opDims);
@@ -241,6 +255,8 @@ protected:
 #ifdef USE_NGRAPH
     std::shared_ptr<CreateNgraph> mCreateNgraph;
     bool mUseNgraph;
+    bool mRemoteCheck;
+    std::shared_ptr<DetectionClient> mDetectionClient;
 #endif
     std::vector<OutputPort> mPorts;  // typedef std::shared_ptr<Data> DataPtr;
     ExecuteNetwork* enginePtr;

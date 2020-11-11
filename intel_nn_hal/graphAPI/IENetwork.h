@@ -127,6 +127,13 @@ static bool isNgraphPropSet() {
     const char ngIrProp[] = "vendor.nn.hal.ngraph";
     return property_get_bool(ngIrProp, false);
 }
+static bool getGrpcIpPort(char *ip_port) {
+    if (property_get("vendor.nn.hal.grpc_ip_port", ip_port, NULL) <= 0) {
+        ALOGE("%s : failed to read vendor.nn.hal.grpc_ip_port", __func__);
+        return false;
+    }
+    return true;
+}
 #endif
 
 class ExecuteNetwork {
@@ -150,9 +157,10 @@ class ExecuteNetwork {
 public:
     ExecuteNetwork() : network(nullptr) {}
 #ifdef USE_NGRAPH
-    ExecuteNetwork(CNNNetwork ngraphNetwork, IRDocument &doc, std::string target = "CPU")
+    ExecuteNetwork(CNNNetwork ngraphNetwork, IRDocument &doc, std::string target = "CPU",
+                   bool ngraphSupport = false)
         : network(nullptr) {
-        mNgraphProp = isNgraphPropSet();
+        mNgraphProp = ngraphSupport;
 #else
     ExecuteNetwork(IRDocument &doc, std::string target = "CPU") : network(nullptr) {
 #endif
@@ -331,19 +339,15 @@ void Infer() {
             inferRequest.SetBlob(firstOutName, outputBlob);
 
     */
-#ifdef NNLOG
-    ALOGI("StartAsync scheduled");
-#endif
+    ALOGI("Infer StartAsync scheduled");
     inferRequest.StartAsync();  // for async infer
     // ALOGI("async wait");
     // inferRequest.Wait(1000);
     inferRequest.Wait(10000);  // check right value to infer
-// inferRequest.Wait(IInferRequest::WaitMode::RESULT_READY);
+                               // inferRequest.Wait(IInferRequest::WaitMode::RESULT_READY);
 
-// std::cout << "output name : " << firstOutName << std::endl;
-#ifdef NNLOG
-    ALOGI("infer request completed");
-#endif
+    // std::cout << "output name : " << firstOutName << std::endl;
+    ALOGI("Infer request completed");
 
     return;
 }

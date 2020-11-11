@@ -55,6 +55,12 @@ public:
 #endif
         return mNodes[nodeName]->get_name();
     }
+    std::vector<size_t> getOutputShape(std::string nodeName) {
+#ifdef NNLOG1
+        ALOGD("%s : nodeName=%s ", __func__, nodeName.c_str());
+#endif
+        return mNodes[nodeName]->get_output_shape(0);
+    }
     void setResultNode(std::string nodeName) {
 #ifdef NNLOG1
         ALOGD("%s : nodeName=%s ", __func__, nodeName.c_str());

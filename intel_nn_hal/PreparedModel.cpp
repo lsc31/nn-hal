@@ -1062,13 +1062,23 @@ bool PreparedModel::initializeRunTimeOperandInfo() {
     return true;
 }
 
+#ifdef USE_NGRAPH
+bool PreparedModel::initialize(bool ngraphSupport) {
+    mUseNgraph = ngraphSupport;
+    checkRemoteConnection();
+#else
 bool PreparedModel::initialize() {
+#endif
     VLOG(L1, "initialize");
     bool success = false;
 
     // Check operation supoorted or not, user may not call getOpertionSupported()
     for (const auto& operation : mModel.operations) {
+#ifdef USE_NGRAPH
+        success = isOperationSupported(operation, mModel, ngraphSupport);
+#else
         success = isOperationSupported(operation, mModel);
+#endif
         dumpOperationSupport(operation, success);
         if (!success) {
             VLOG(L1, "get unsupported operation in initialize()");
@@ -1151,8 +1161,7 @@ bool PreparedModel::initialize() {
 
     InferenceEngine::CNNNetwork ngraph_net;
 #ifdef USE_NGRAPH
-    ngraph_net = mCreateNgraph->generate(std::string("/data/vendor/neuralnetworks/ngraph_ir.xml"),
-                                         std::string("/data/vendor/neuralnetworks/ngraph_ir.bin"));
+    ngraph_net = mCreateNgraph->generate(IR_XML, IR_BIN);
 #endif
     if (success == false) return success;
 
@@ -1160,13 +1169,14 @@ bool PreparedModel::initialize() {
 
     VLOG(L1, "initialize ExecuteNetwork for device %s", mTargetDevice.c_str());
 #ifdef USE_NGRAPH
-    enginePtr = new ExecuteNetwork(ngraph_net, mNet, mTargetDevice);
+    enginePtr = new ExecuteNetwork(ngraph_net, mNet, mTargetDevice, mUseNgraph);
 #else
     enginePtr = new ExecuteNetwork(mNet, mTargetDevice);
 #endif
     enginePtr->prepareInput();
 #ifdef USE_NGRAPH
     enginePtr->loadNetwork(ngraph_net);
+    if (mUseNgraph && mRemoteCheck) loadRemoteModel();
 #else
     enginePtr->loadNetwork();
 #endif
@@ -1527,6 +1537,7 @@ Return<void> PreparedModel::executeSynchronously(const Request& request, Measure
                                                  executeSynchronously_cb cb) {
     VLOG(L1, "Begin to executeSynchronously");
     time_point driverStart, driverEnd, deviceStart, deviceEnd;
+
     if (measure == MeasureTiming::YES) driverStart = now();
 
     if (!validateRequest(request, mModel)) {
@@ -1596,18 +1607,49 @@ Return<void> PreparedModel::executeSynchronously(const Request& request, Measure
                     operand.length);  // if not doing memcpy
                 uint8_t* dest = outputBlob->buffer().as<uint8_t*>();
                 uint8_t* src = srcBlob->buffer().as<uint8_t*>();
+#ifdef USE_NGRAPH
+                if (mRemoteCheck && mUseNgraph && mDetectionClient->get_status())
+                    mDetectionClient->get_output_data(
+                        mCreateNgraph->getNodeName(mPorts[indexes[i]]->getName()), dest,
+                        mCreateNgraph->getOutputShape(mPorts[indexes[i]]->getName()));
+                else
+                    std::memcpy(dest, src, outputBlob->byteSize());
+#else
                 std::memcpy(dest, src, outputBlob->byteSize());
+#endif
             }
         }
     };
 
     VLOG(L1, "pass request inputs buffer to network/model respectively");
 
+#ifdef USE_NGRAPH
+    if (mUseNgraph && mRemoteCheck) {
+        auto indexes = mModel.inputIndexes;
+        for (size_t i = 0; i < indexes.size(); i++) {
+            const RequestArgument& arg = request.inputs[i];
+            auto poolIndex = arg.location.poolIndex;
+            nnAssert(poolIndex < requestPoolInfos.size());
+            auto& r = requestPoolInfos[poolIndex];
+            mDetectionClient->add_input_data(
+                mCreateNgraph->getNodeName(mPorts[indexes[i]]->getName()),
+                const_cast<uint8_t*>(r.buffer + arg.location.offset),
+                mCreateNgraph->getOutputShape(mPorts[indexes[i]]->getName()));
+        }
+        VLOG(L1, "Remote Run");
+        auto reply = mDetectionClient->remote_infer();
+        ALOGI("***********GRPC server response************* %s", reply.c_str());
+    }
+    if (!mRemoteCheck || !mDetectionClient->get_status()) {
+        inOutData(mModel.inputIndexes, request.inputs, true, enginePtr, mPorts);
+        VLOG(L1, "Client Run");
+        enginePtr->Infer();
+    }
+#else
     inOutData(mModel.inputIndexes, request.inputs, true, enginePtr, mPorts);
     VLOG(L1, "Run");
-
     enginePtr->Infer();
-
+#endif
     VLOG(L1, "pass request outputs buffer to network/model respectively");
     inOutData(mModel.outputIndexes, request.outputs, false, enginePtr, mPorts);
 
@@ -1632,6 +1674,7 @@ Return<void> PreparedModel::executeSynchronously(const Request& request, Measure
         (mUseNgraph == true) ? enginePtr->getBlob(mCreateNgraph->getNodeName(
                                    mPorts[mModel.inputIndexes[0]]->getName()))
                              : enginePtr->getBlob(mPorts[mModel.inputIndexes[0]]->getName());
+    mDetectionClient->clear_data();
 #else
         enginePtr->getBlob(mPorts[mModel.inputIndexes[0]]->getName());
 #endif
@@ -1681,8 +1724,45 @@ T getOperandConstVal(const Model& model, const Operand& operand) {
     const T* data = reinterpret_cast<const T*>(&model.operandValues[operand.location.offset]);
     return data[0];
 }
+#ifdef USE_NGRAPH
+bool PreparedModel::checkRemoteConnection() {
+    char ip_port[PROPERTY_VALUE_MAX] = "";
+    if (!getGrpcIpPort(ip_port)) ALOGE("Invalid value for ip_port property : %s", ip_port);
+    mDetectionClient = std::make_shared<DetectionClient>(
+        grpc::CreateChannel(ip_port, grpc::InsecureChannelCredentials()));
+    bool success = false;
+    auto reply = mDetectionClient->prepare(success);
+    ALOGI("GRPC (%s) prepare response - %d : %s", ip_port, success, reply.c_str());
+    mRemoteCheck = success;
+    return success;
+}
+bool PreparedModel::loadRemoteModel() {
+    bool success = false;
+    auto reply = mDetectionClient->sendIRs(success);
+    ALOGI("sendIRs response GRPC %d  %s", success, reply.c_str());
+    mRemoteCheck = success;
+    return success;
+}
+bool PreparedModel::isOperationSupportedByNgraph(const Operation& operation) {
+    switch (operation.type) {
+        case OperationType::CONV_2D:
+        case OperationType::DEPTHWISE_CONV_2D:
+        case OperationType::CONCATENATION:
+        case OperationType::RESHAPE:
+            return true;
+        default:
+            VLOG(L0, "operation %d not supported by ngraph", operation.type);
+            return false;
+    }
+}
+#endif
 
+#ifdef USE_NGRAPH
+bool PreparedModel::isOperationSupported(const Operation& operation, const Model& model,
+                                         bool ngraphSupport) {
+#else
 bool PreparedModel::isOperationSupported(const Operation& operation, const Model& model) {
+#endif
     VLOG(L1, "Check operation %d", operation.type);
 
 #define VLOG_CHECKFAIL(fail) VLOG(L1, "Check failed: %s", fail)
@@ -2025,8 +2105,7 @@ bool PreparedModel::isOperationSupported(const Operation& operation, const Model
 #ifdef USE_NGRAPH
         case OperationType::CONCATENATION:
         case OperationType::RESHAPE:
-            if (!isNgraphPropSet())  // TODO:using this API as mUseNgraph is non-static
-            {
+            if (!ngraphSupport) {
                 VLOG(L1, "operation supported only for ngraph %d", operation.type);
                 return false;
             } else
