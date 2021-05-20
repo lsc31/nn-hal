@@ -1145,6 +1145,9 @@ bool PreparedModel::initialize() {
             case OperationType::ADD:
                 success = operationAdd(operation);
                 break;
+            case OperationType::LOGISTIC:
+                success = operationLogistic(operation);
+                break;
             default:
                 VLOG(L1, "unsupported operation %d", operation.type);
                 return false;
@@ -1749,6 +1752,8 @@ bool PreparedModel::isOperationSupportedByNgraph(const Operation& operation) {
         case OperationType::DEPTHWISE_CONV_2D:
         case OperationType::CONCATENATION:
         case OperationType::RESHAPE:
+        case OperationType::MAX_POOL_2D:
+        case OperationType::LOGISTIC:
             return true;
         default:
             VLOG(L0, "operation %d not supported by ngraph", operation.type);
@@ -1978,7 +1983,7 @@ bool PreparedModel::isOperationSupported(const Operation& operation, const Model
         case OperationType::MAX_POOL_2D: {
             int oper_size = operation.inputs.size();
             const auto& input0 = model.operands[operation.inputs[OP_INPUT_IDX_POOL]];
-            VLOG(L1, "Validating AVG_POOL_2D params");
+            VLOG(L1, "Validating Pooling params");
 
             if (input0.type != OperandType::TENSOR_FLOAT32) {
                 VLOG(L1, "NNERR: input0 invalid operand types");
@@ -2455,6 +2460,13 @@ bool PreparedModel::operationMaxPool2D(const Operation& operation) {
 
     auto out = Pooling(input, kernel, stride, pad_start, pad_end, padType,
                        InferenceEngine::PoolingLayer::PoolType::MAX);
+
+#ifdef USE_NGRAPH
+    GenPoolParams genPoolPrms;
+    PoolingParamsToGenPoolParams(genPoolPrms, kernel, stride, pad_start, pad_end, padType);
+    mCreateNgraph->addPooling(out->getName(), input->getName(), genPoolPrms, InferenceEngine::PoolingLayer::PoolType::MAX);
+#endif
+
     mPorts[operation.outputs[0]] = handleFusion(out, PARAM_I32(fusion_index));
 
     return true;
@@ -3174,6 +3186,44 @@ bool PreparedModel::operationRELU6(const Operation& operation) {
      */
 
     mPorts[operation.outputs[0]] = Clamp(getPort(operation.inputs[0]), 0, 6);
+    return true;
+}
+
+bool PreparedModel::operationLogistic(const Operation& operation) {
+    VLOG(L1, "OperationType::Logistic");
+
+    /**
+     * Computes sigmoid activation on the input tensor element-wise.
+     *
+     * The output is calculated using this formula:
+     *
+     *     output = 1 / (1 + exp(-input))
+     *
+     * Supported tensor {@link OperandType}:
+     * * {@link OperandType::TENSOR_FLOAT16} (since HAL version 1.2)
+     * * {@link OperandType::TENSOR_FLOAT32}
+     * * {@link OperandType::TENSOR_QUANT8_ASYMM}
+     * * {@link OperandType::TENSOR_QUANT8_ASYMM_SIGNED} (since HAL version 1.3)
+     *
+     * Supported tensor rank: up to 4.
+     *
+     * Inputs:
+     * * 0: A tensor, specifying the input.
+     *      Since HAL version 1.2, this tensor may be zero-sized.
+     *
+     * Outputs:
+     * * 0: The output tensor of same shape as input0.
+     *      For {@link OperandType::TENSOR_QUANT8_ASYMM},
+     *      the scale must be 1.f / 256 and the zeroPoint must be 0.
+     *      For {@link OperandType::TENSOR_QUANT8_ASYMM_SIGNED},
+     *      the scale must be 1.f / 256 and the zeroPoint must be -128.
+     */
+
+    auto input = getPort(operation.inputs[0]);
+    mPorts[operation.outputs[0]] = Sigmoid(input);
+#ifdef USE_NGRAPH
+    mCreateNgraph->addSigmoid(mPorts[operation.outputs[0]]->getName(), input->getName());
+#endif
     return true;
 }
 

@@ -98,6 +98,12 @@ public:
 #endif
         addNode(nodeName, std::make_shared<ngraph::opset3::Relu>(mNodes[inputName]));
     }
+    void addSigmoid(std::string nodeName, std::string inputName) {
+#ifdef NNLOG1
+        ALOGD("%s : nodeName=%s inputName=%s ", __func__, nodeName.c_str(), inputName.c_str());
+#endif
+        addNode(nodeName, std::make_shared<ngraph::opset3::Sigmoid>(mNodes[inputName]));
+    }
     void addReshape(std::string nodeName, std::string inputName, std::vector<size_t> shape) {
 #ifdef NNLOG1
         ALOGD("%s : nodeName=%s inputName=%s ", __func__, nodeName.c_str(), inputName.c_str());
@@ -145,6 +151,37 @@ public:
         }
         try {
             addNode(nodeName, std::make_shared<ngraph::opset3::Concat>(inputs, axis));
+        } catch (const std::exception& ex) {
+            ALOGE("%s Exception !!! %s", __func__, ex.what());
+        }
+    }
+    void addPooling(std::string nodeName, std::string inputName, GenPoolParams gPrms,
+                          InferenceEngine::PoolingLayer::PoolType type) {
+#ifdef NNLOG1
+        ALOGD("%s : nodeName=%s inputNames=%s ", __func__, nodeName.c_str(), inputName.c_str());
+#endif
+        std::shared_ptr<ngraph::Node> input;
+        try {
+            if (type == InferenceEngine::PoolingLayer::PoolType::MAX) {
+                ngraph::op::PadType auto_pad = ngraph::op::PadType::EXPLICIT;
+                if (!std::strcmp(gPrms.pad_type, "explicit"))
+                    auto_pad = ngraph::op::PadType::EXPLICIT;
+                else if (!std::strcmp(gPrms.pad_type, "same_upper"))
+                    auto_pad = ngraph::op::PadType::SAME_UPPER;
+                else if (!std::strcmp(gPrms.pad_type, "valid"))
+                    auto_pad = ngraph::op::PadType::VALID;
+                input = std::make_shared<ngraph::opset3::MaxPool>(
+                    mNodes[inputName], ngraph::Strides(gPrms.strides),
+                    ngraph::Shape(gPrms.pads_begin),
+                    ngraph::Shape(gPrms.pads_end), 
+                    ngraph::Shape(gPrms.kernel),ngraph::op::RoundingType::FLOOR,
+                    auto_pad);
+                    
+            } 
+            else {
+                //Avg pool
+            }
+            addNode(nodeName, input);
         } catch (const std::exception& ex) {
             ALOGE("%s Exception !!! %s", __func__, ex.what());
         }

@@ -221,6 +221,7 @@ protected:
     bool operationRELU6(const Operation& operation);
     bool operationReshape(const Operation& operation);
     bool operationSoftmax(const Operation& operation);
+    bool operationLogistic(const Operation& operation);
 
     void initializeInput();
     bool finalizeOutput(/*RunTimeOperandInfo* output*/);

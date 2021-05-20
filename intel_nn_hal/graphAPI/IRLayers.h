@@ -323,6 +323,23 @@ inline void ConvolutionParamsToGenConvParams(ConvolutionParams &cPrms, GenConvPa
     gPrms.dilations = {1, 1};
     gPrms.pad_type = cPrms.padType.c_str();
 }
+
+struct GenPoolParams {
+    std::vector<size_t> strides;
+    std::vector<size_t> pads_begin;
+    std::vector<size_t> pads_end;
+    std::vector<size_t> kernel;
+    const char *pad_type;
+};
+
+inline void PoolingParamsToGenPoolParams(GenPoolParams &gPrms, const Point2D &kernel, const Point2D &stride,
+                          const Point2D &pad_start, const Point2D &pad_end, std::string padType) {
+    gPrms.kernel = {(size_t)kernel.x, (size_t)kernel.y};
+    gPrms.strides = {(size_t)stride.x, (size_t)stride.y};
+    gPrms.pads_begin = {(size_t)pad_start.x, (size_t)pad_start.y};
+    gPrms.pads_end = {(size_t)pad_end.x, (size_t)pad_end.y};
+    gPrms.pad_type = padType.c_str();
+}
 #endif
 
 inline size_t in_ch(const OutputPort &src) {
@@ -829,6 +846,19 @@ inline OutputPort Clamp(const OutputPort &src, float min, float max) {
     layer->max_value = max;
     layer->params["max"] = std::to_string(layer->max_value);
     layer->params["min"] = std::to_string(layer->min_value);
+    src >> layer;
+    addOutput(layer, src->getTensorDesc().getDims());
+    return output(layer);
+}
+
+inline OutputPort Sigmoid(const OutputPort &src) {
+    std::string name = "Sigmoid-";  // todo: make it unique
+    name = name << layer_name_count++;
+    InferenceEngine::LayerParams prms;
+    prms.precision = g_layer_precision;
+    prms.name = name;
+    auto layer = std::make_shared<InferenceEngine::CNNLayer>(prms);
+    layer->type = "Sigmoid";
     src >> layer;
     addOutput(layer, src->getTensorDesc().getDims());
     return output(layer);
