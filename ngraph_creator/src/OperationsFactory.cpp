@@ -11,13 +11,9 @@ OperationsFactory::OperationsFactory(const std::string& plugin,
                                      std::shared_ptr<NgraphNodes> nodes) {
     OperationsBase::sPluginType = plugin;
     OperationsBase::sModelInfo = modelInfo;
-    OperationsBase::mNgraphNodes = nodes;
     ALOGV("%s Constructed", __func__);
 }
-OperationsFactory::~OperationsFactory() {
-    OperationsBase::mNgraphNodes.reset();
-    ALOGV("%s Destructed & reset", __func__);
-}
+OperationsFactory::~OperationsFactory() { ALOGV("%s Destructed", __func__); }
 std::shared_ptr<OperationsBase> OperationsFactory::getOperation(
     int operationIndex, const OperationType& operationType) {
     switch (operationType) {
@@ -25,6 +21,8 @@ std::shared_ptr<OperationsBase> OperationsFactory::getOperation(
             return std::make_shared<Abs>(operationIndex);
         case OperationType::ADD:
             return std::make_shared<Add>(operationIndex);
+        case OperationType::AVERAGE_POOL_2D:
+            return std::make_shared<Average_Pool_2D>(operationIndex);
         case OperationType::CAST:
             return std::make_shared<Cast>(operationIndex);
         case OperationType::CONCATENATION:
