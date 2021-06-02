@@ -29,6 +29,7 @@
 #include <Mul.hpp>
 #include <Neg.hpp>
 #include <Not_Equal.hpp>
+#include <Pad.hpp>
 #include <Pow.hpp>
 #include <Reduce_All.hpp>
 #include <Reduce_Any.hpp>
