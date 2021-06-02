@@ -77,6 +77,8 @@ std::shared_ptr<OperationsBase> OperationsFactory::getOperation(
             return std::make_shared<Not_Equal>(operationIndex);
         case OperationType::PAD:
             return std::make_shared<Pad>(operationIndex);
+        case OperationType::PAD_V2:
+            return std::make_shared<Pad_V2>(operationIndex);
         case OperationType::POW:
             return std::make_shared<Pow>(operationIndex);
         case OperationType::REDUCE_ALL:

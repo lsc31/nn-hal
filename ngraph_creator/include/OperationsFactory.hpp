@@ -30,6 +30,7 @@
 #include <Neg.hpp>
 #include <Not_Equal.hpp>
 #include <Pad.hpp>
+#include <Pad_V2.hpp>
 #include <Pow.hpp>
 #include <Reduce_All.hpp>
 #include <Reduce_Any.hpp>
